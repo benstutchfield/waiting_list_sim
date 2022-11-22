@@ -1,0 +1,601 @@
+---
+title: "Waiting list dynamics"
+output:
+  html_document: default
+  word_document: default 
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+#test
+
+```{r Packages, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(rstatix)
+library(msm)
+library(purrr)
+library(ggpubr)
+library(sn) 
+library(readr)
+library(gganimate)
+library(glue)
+library(dplyr)
+library(gridExtra)
+
+
+theme_set(theme_bw(base_size = 18))
+
+```
+
+```{r Data import, include=FALSE}
+
+waiting_list_simulation <- read_csv("waiting_time_table_10yr.csv")
+transplanted_patient_simulation <- read_csv("transplanted_patient_table_10yr.csv")
+
+#waiting_list_simulation <- read_csv("waiting_time_table.csv")
+#transplanted_patient_simulation <- read_csv("transplanted_patient_table.csv")
+
+transplanted_patient_table = transplanted_patient_simulation
+waiting_time_table = waiting_list_simulation
+
+
+
+
+```
+
+
+nrow( waiting_list_simulation %>% filter(sim_count == 2) %>% filter(additional_points == "0 additional points") %>% filter(run_count == 104))
+
+
+
+
+```{r baseline characteristics, fig.height=7, fig.width=7, message=FALSE, warning=FALSE}
+
+blood_group = transplanted_patient_table %>% ggplot(aes(x = blood_group_recip, fill = additional_points))+
+geom_histogram(stat = "count", alpha = 0.5)+
+theme(legend.position = "none", aspect.ratio= 0.75)+
+facet_wrap(~additional_points)
+
+recip_weight = transplanted_patient_table %>% ggplot(aes(x = weight_recip, colour = additional_points))+
+geom_density(aes(y = ..count..))
+theme(legend.position = "none", aspect.ratio= 0.75)+
+facet_wrap(~additional_points)
+
+tbs = transplanted_patient_table %>% ggplot(aes(x = tbs, colour = additional_points))+
+geom_density(aes(y = ..count..))+
+theme(legend.position = "none", aspect.ratio= 0.75)+
+facet_wrap(~additional_points)
+
+grid.arrange(blood_group, recip_weight, tbs)
+
+
+```
+
+```{r tbs at transplant summary}
+
+
+#Create the stats for the summary
+tbs_at_tx_summary = transplanted_patient_table %>% group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>% summarise(
+  n= n(),
+  median = median(tbs), 
+  q1 = quantile(tbs, probs = 0.25), 
+  q3 = quantile(tbs, probs = 0.75), 
+  min = min(tbs), 
+  max = max(tbs)
+)
+
+tbs_at_tx_summary = as_tibble(tbs_at_tx_summary)
+tbs_at_tx_summary$additional_points = as.factor(tbs_at_tx_summary$additional_points)
+tbs_at_tx_summary$sim_count = as.factor(tbs_at_tx_summary$sim_count)
+
+  
+  # Create the stats for the real-world transplanted patients
+  # 36 month TBS report = median 1154; IQR= 1006-1302; range = -138 - 1627
+sim_count = as.factor( c("36m report", "36m report", "36m report")    )                         
+additional_points = as.factor(c("0 additional points", "10 additional points", "20 additional points"))
+n = c( 3600 , 3600, 3600)
+median = c(1155, 1155, 1155)
+q1 = c(1006, 1006, 1006)
+q3 = c(1302, 1302, 1302) 
+min = c(-138, -138, -138) 
+max = c(1627, 1627, 1627)
+
+real_patients = tibble(sim_count = sim_count, additional_points = additional_points, n = n, median = median, q1 = q1, q3 = q3, min = min, max = max)
+
+tbs_at_tx_summary = bind_rows(tbs_at_tx_summary, real_patients)
+
+# Put the real world patients and simulations in order
+tbs_at_tx_summary = tbs_at_tx_summary %>% mutate(sim_count = fct_relevel(sim_count, 
+                                                                             c("36m report", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20")))
+
+# Create the highlight for the real-world data
+tbs_at_tx_summary = tbs_at_tx_summary %>% mutate( highlight=ifelse(sim_count == "36m report", "Real-world patients", "Simulated patients"))
+tbs_at_tx_summary
+
+
+```
+
+```{r tbs at transplant plot,  fig.height=4, fig.width=7, message=FALSE, warning=FALSE}
+
+
+# Create the combined boxplot
+tbs_at_tx_summary %>% filter(additional_points == "0 additional points") %>%  ggplot(aes(x = sim_count, ymin=min, lower=`q1`, middle = `median`, upper = `q3`, ymax = max, fill = highlight, group = sim_count)) + 
+  geom_boxplot(stat="identity", alpha = 0.6, aes(group = sim_count))+
+  theme(legend.title=element_blank(),  aspect.ratio = 0.5)+
+  #scale_fill_manual(values = c("Red", "blue"))+
+  labs( title = "TBS at transplant: Actual vs Simulated", y = "Transplant Benefit Score", x= "Simulation Count")
+ # facet_wrap(~additional_points)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r tbs at transplant plot 2}
+
+
+tbs_at_tx_box2 = ggplot(transplanted_patient_simulation, aes(y=tbs, x=as.factor(sim_count), fill = factor(sim_count)))+
+  geom_boxplot(alpha = 0.5)+
+  theme(legend.position = "none")+
+  geom_hline(yintercept=1154, linetype="dashed", color = "red", size = 1)+
+  geom_hline(yintercept=1006, linetype="dotted", color = "red", size = 1)+
+  geom_hline(yintercept=1302, linetype="dotted", color = "red", size = 1)+
+  geom_hline(yintercept=-138, linetype="dotted", color = "red", size = 1)+
+  geom_hline(yintercept=1627, linetype="dotted", color = "red", size = 1)+
+  theme(aspect.ratio = 0.5)
+tbs_at_tx_box2
+  
+
+```
+
+
+
+
+
+
+```{r number of transplants}
+
+tx_stats = transplanted_patient_table %>% group_by(sim_count, additional_points)%>% 
+  summarise(number = n(), median_tbs = median(tbs), Q1 = quantile(tbs, 0.25), Q3 = quantile(tbs, 0.75), median_time_on_list = median(number_of_runs_involved) )
+tx_stats
+
+```
+
+
+
+
+
+
+
+
+
+```{r time on list all, fig.height=2.5, fig.width=9 }
+
+#tx_stats %>% ggplot(aes(x= sim_count, y=median_time_on_list, colour = additional_points))+
+#  geom_jitter()+
+#  facet_wrap(~additional_points)+
+ # theme(aspect.ratio= 0.5, legend.position = "none")
+
+median_time = tx_stats %>% ggplot(aes(x= additional_points, y=median_time_on_list, fill = additional_points))+
+     geom_jitter(aes(colour = additional_points), size = 3)+
+   geom_boxplot(alpha = 0.5, outlier.shape= NA)+
+ # ylim(0, 25)+
+  theme(aspect.ratio= 0.5, legend.position = "none")+
+  labs(title = "Median Time to Transplant", subtitle = "Across all simulations", y = "Time waiting list (weeks)", x="")
+
+median_tbs = tx_stats %>% ggplot(aes(x= additional_points, y=median_tbs, fill = additional_points))+
+    geom_jitter(aes(colour = additional_points), size = 3)+
+  geom_boxplot(alpha = 0.5)+
+  ylim(1100, 1200)+
+  theme(aspect.ratio= 0.5, legend.position = "none")+
+  labs(title = "TBS of transplanted patients (at listing)", subtitle = "Across all simulations", y = "TBS at listing", x="")
+
+median_time_and_tbs = grid.arrange(median_time, median_tbs, ncol = 2)
+
+```
+
+
+
+
+```{r n list at end table, message=FALSE, warning=FALSE}
+
+
+#Calculate % of patients on the list at 1, 3 and 5 years 
+#Calculated as % of total patients who could have been on the list
+
+waiting_time_table$additional_points = as.factor(waiting_time_table$additional_points)
+waiting_time_table$sim_count = as.factor(waiting_time_table$sim_count)
+
+
+#need to look at only people who could have only waited more than 1, 3 or 5 years
+total_on_list = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>%
+  distinct(recip_id) %>%
+    summarise(
+    total_on_list = n()
+  )
+
+
+#need to look at only people who could have only waited more than 1, 3 or 5 years
+total_possible_list_1yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>%  filter(run_count>52) %>% distinct(recip_id) %>%
+    summarise(
+    total_possible_list = n()
+  )
+total_possible_list_1yr$time = "1 year"
+
+
+proportion_on_list_at_1_yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>% filter(number_of_runs_involved > 51) %>%  distinct(recip_id) %>%
+    summarise(
+    no_on_list = n()
+  )
+proportion_on_list_at_1_yr$time = "1 year"
+#proportion_on_list_at_1_yr$total = total_on_list$total_on_list
+#proportion_on_list_at_1_yr$Percent =  (proportion_on_list_at_1_yr$no_on_list  /    total_on_list$total_on_list)*100
+
+percentage_on_list_1yr = merge(total_possible_list_1yr, proportion_on_list_at_1_yr)
+percentage_on_list_1yr$pct_on_list = (percentage_on_list_1yr$no_on_list / percentage_on_list_1yr$total_possible_list) *100
+
+
+#3 year values
+#run count is one more than actual (i.e. starts on 2)
+total_possible_list_3yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>%  filter(run_count>156) %>% distinct(recip_id) %>%
+    summarise(
+    total_possible_list = n()
+  )
+total_possible_list_3yr$time = "3 year"
+
+#number of runs involved is the actual (i.e. starts on 1)
+proportion_on_list_at_3_yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>% filter(number_of_runs_involved > 155) %>%  distinct(recip_id) %>%
+    summarise(
+    no_on_list = n()
+  )
+proportion_on_list_at_3_yr$time = "3 year"
+#proportion_on_list_at_3_yr$total = total_on_list$total_on_list
+#proportion_on_list_at_3_yr$Percent =  (proportion_on_list_at_3_yr$no_on_list  /    total_on_list$total_on_list)*100
+
+percentage_on_list_3yr = merge(total_possible_list_3yr, proportion_on_list_at_3_yr)
+percentage_on_list_3yr$pct_on_list = (percentage_on_list_3yr$no_on_list / percentage_on_list_3yr$total_possible_list) *100
+
+#5 year values
+#run count is one more than actual (i.e. starts on 2)
+total_possible_list_5yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>%  filter(run_count>260) %>% distinct(recip_id) %>%
+    summarise(
+    total_possible_list = n()
+  )
+total_possible_list_5yr$time = "5 year"
+
+#number of runs involved is the actual (i.e. starts on 1)
+proportion_on_list_at_5_yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>% filter(number_of_runs_involved > 259) %>%  distinct(recip_id) %>%
+    summarise(
+    no_on_list = n()
+  )
+proportion_on_list_at_5_yr$time = "5 year"
+#proportion_on_list_at_5_yr$total = total_on_list$total_on_list
+#proportion_on_list_at_5_yr$Percent =  (proportion_on_list_at_5_yr$no_on_list  /    total_on_list$total_on_list)*100
+
+percentage_on_list_5yr = merge(total_possible_list_5yr, proportion_on_list_at_5_yr)
+percentage_on_list_5yr$pct_on_list = (percentage_on_list_5yr$no_on_list / percentage_on_list_5yr$total_possible_list) *100
+
+
+#10 year values
+#run count is one more than actual (i.e. starts on 2)
+total_possible_list_10yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>%  filter(run_count>520) %>% distinct(recip_id) %>%
+    summarise(
+    total_possible_list = n()
+  )
+total_possible_list_10yr$time = "10 year"
+
+
+#number of runs involved is the actual (i.e. starts on 1)
+proportion_on_list_at_10_yr = waiting_time_table  %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>% filter(number_of_runs_involved > 519) %>%  distinct(recip_id) %>%
+    summarise(
+    no_on_list = n()
+  )
+proportion_on_list_at_10_yr$time = "10 year"
+#proportion_on_list_at_10_yr$total = total_on_list$total_on_list
+#proportion_on_list_at_10_yr$Percent =  (proportion_on_list_at_10_yr$no_on_list  /    total_on_list$total_on_list)*100
+
+percentage_on_list_10yr = merge(total_possible_list_10yr, proportion_on_list_at_10_yr)
+percentage_on_list_10yr$pct_on_list = (percentage_on_list_10yr$no_on_list / percentage_on_list_10yr$total_possible_list) *100
+
+
+
+#join tables together
+pct_on_list_at_time = rbind(percentage_on_list_1yr, percentage_on_list_3yr, percentage_on_list_5yr, percentage_on_list_10yr)
+
+#change time into a factor and change the order
+pct_on_list_at_time$time = as.factor(pct_on_list_at_time$time)
+pct_on_list_at_time$time = fct_relevel(pct_on_list_at_time$time, "1 year", "3 year", "5 year", "10 year")
+
+
+
+```
+
+
+
+```{r remaining on list plot, fig.height=2.5, fig.width=7, message=FALSE, warning=FALSE}
+  mean_pct_on_list =  pct_on_list_at_time%>% select(pct_on_list, time, additional_points, sim_count) %>%
+  group_by(time, additional_points ) %>%
+  summarise(mean_pct_on_list = round(mean(pct_on_list),1), number = n())
+
+pct_on_list_at_time %>% ggplot(aes(x = time, y= pct_on_list, group = time, fill = time, colour  =additional_points)) + 
+  #geom_boxplot( colour = "black", alpha = 0.5, outlier.alpha = 0)+
+  geom_jitter(stat="identity", alpha = 0.8, size = 2)+
+  theme(legend.title=element_blank(), legend.position = "none")+
+  ylim(0,50)+
+  #scale_fill_manual(values = c("Red", "blue"))+
+  labs( title = "% Remaining on list at 1, 3 and 5 years", y = "% remaining on list", x= "Time on waiting list")+
+  facet_wrap(~additional_points)+
+  stat_summary(fun.y= mean, fun.ymin=mean, fun.ymax=mean, geom="crossbar", width=0.5, color="black")+
+  geom_text(data = mean_pct_on_list, aes(x=time, y=mean_pct_on_list, label = paste(mean_pct_on_list,"%")), colour = "black", alpha=0.8, size = 5, vjust= -1.2)
+
+
+
+```
+
+
+```{r tbs of long waits,  fig.height=6, fig.width=9, message=FALSE, warning=FALSE}
+#TBS of patients waiting >1,3,5,10 years on the list
+
+wait_less_6mnth = waiting_time_table  %>% filter(number_of_runs_involved > 0 & number_of_runs_involved < 7) %>% arrange(number_of_runs_involved) %>% group_by(additional_points, recip_id) %>% slice_head(n=1)
+
+wait_less_1yr = waiting_time_table  %>% filter(number_of_runs_involved < 53) %>% arrange(number_of_runs_involved) %>% group_by(additional_points, recip_id) %>% slice_head(n=1)
+
+wait_1_to_3_yrs = waiting_time_table  %>% filter(number_of_runs_involved > 51 & number_of_runs_involved <156) %>% group_by(additional_points, recip_id) %>% arrange(number_of_runs_involved)  %>% slice_head(n=1)
+
+wait_3_to_5_yrs = waiting_time_table  %>% filter(number_of_runs_involved > 155 & number_of_runs_involved <260) %>% group_by(additional_points, recip_id) %>% arrange(number_of_runs_involved)  %>% slice_head(n=1)
+
+wait_10_yrs = waiting_time_table  %>% filter(number_of_runs_involved > 519) %>% group_by(additional_points, recip_id) %>% arrange(number_of_runs_involved)  %>% slice_head(n=1)
+
+
+
+
+wait_less_6mnth_plot = wait_less_6mnth %>% ggplot(aes(x=tbs, fill = additional_points))+
+geom_density(aes(y=..count..),alpha = 0.5)+
+labs(title = "Wait <6 months")+
+xlim(-500, 1500)
+
+wait_1yr = waiting_time_table  %>% filter(number_of_runs_involved > 51) %>% group_by(additional_points, recip_id)%>% arrange(number_of_runs_involved)%>%
+slice_head(n=1)
+
+wait_1yr_plot = wait_1yr %>% ggplot(aes(x=tbs, fill = additional_points))+
+geom_density(aes(y=..count..),alpha = 0.5)+
+labs(title = "Wait >1 year")+
+xlim(-500, 1500)
+
+wait_3yr = waiting_time_table  %>% filter(number_of_runs_involved > 155) %>% group_by(additional_points, recip_id) %>% arrange(number_of_runs_involved)%>% slice_head(n=1)
+
+wait_3yr_plot = wait_3yr %>% ggplot(aes(x=tbs, fill = additional_points))+
+geom_density(aes(y=..count..),alpha = 0.5)+
+  labs(title = "Wait >3 years")+
+xlim(-500, 1500)
+
+wait_5yr = waiting_time_table  %>% filter(number_of_runs_involved > 259) %>% arrange(number_of_runs_involved) %>% group_by(additional_points, recip_id)%>% 
+slice_head(n=1)
+
+wait_5yr_plot = wait_5yr %>% ggplot(aes(x=tbs, fill = additional_points))+
+geom_density(aes(y=..count..), alpha = 0.5)+
+  labs(title = "Wait >5 years")+
+xlim(-500, 1500)
+#facet_wrap(~additional_points)+
+#theme(legend.position = "none")
+
+wait_10yr = waiting_time_table  %>% filter(number_of_runs_involved > 519) %>% group_by(additional_points, recip_id) %>%  arrange(number_of_runs_involved)%>%
+slice_head(n=1)
+
+wait_10yr_plot = wait_10yr %>% ggplot(aes(x=tbs, fill = additional_points))+
+geom_density(aes(y=..count..),alpha = 0.5)+
+labs(title = "Wait >10 years")+
+xlim(-500, 1500)
+#facet_wrap(~additional_points)+
+#theme(legend.position = "none")
+
+ ggarrange(wait_1yr_plot, wait_3yr_plot,wait_5yr_plot, wait_10yr_plot,
+                             common.legend = TRUE, legend="bottom")
+
+ 
+
+
+```
+
+
+
+
+
+
+
+
+```{r tbs of long waits,  fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
+
+wait_5yr_tbs_500_600 = waiting_time_table  %>% filter(number_of_runs_involved > 259) %>% arrange(number_of_runs_involved)%>%
+group_by(recip_id)%>% slice_head(n=1) %>% filter(tbs >499 & tbs < 601)
+
+transplant_5yr_tbs_500_600 = transplanted_patient_table   %>% arrange(number_of_runs_involved)%>%
+group_by(recip_id)%>% slice_head(n=1) %>% filter(tbs >499 & tbs < 601)
+
+nrow(transplant_5yr_tbs_500_600) 
+nrow(wait_5yr_tbs_500_600)
+
+pct_tx_tbs500_600_5yr = nrow(transplant_5yr_tbs_500_600) / nrow(wait_5yr_tbs_500_600) *100
+pct_tx_tbs500_600_5yr
+
+
+transplant = transplanted_patient_table
+
+#%>% arrange(number_of_runs_involved)%>%
+#group_by(recip_id)%>% slice_head(n=1)
+
+ggplot(wait_1yr, aes(x = tbs)) +geom_histogram(fill = "orange", alpha = 0.5, bins = 500)+
+  geom_histogram(data = wait_3yr, fill = "red", alpha = 0.5, bins = 500)+
+geom_histogram(data = wait_5yr, fill = "magenta", alpha = 0.5, bins = 500)+
+  geom_histogram(data = wait_10yr, fill = "darkblue", alpha = 0.5, bins = 500)+
+  geom_histogram(data = transplant, fill = "forestgreen", alpha = 0.5, bins = 500)+
+  labs(title = "TBS of transplanted patients versus those waiting >5yrs")
+
+ggplot(wait_1yr, aes(x = tbs)) +geom_density(colour = "orange", alpha = 0.5, bins = 500)+
+  geom_density(data = wait_3yr, colour = "red", alpha = 0.5, bins = 500)+
+geom_density(data = wait_5yr ,colour = "magenta", alpha = 0.5, bins = 500)+
+  geom_density(data = wait_10yr, colour = "darkblue", alpha = 0.5, bins = 500)+
+  geom_density(data = transplant, colour = "forestgreen", alpha = 0.5, bins = 500)+
+  labs(title = "TBS of transplanted patients versus those waiting >5yrs")
+
+ggplot(wait_1yr, aes(x = tbs)) +geom_density(aes(y=..count..), colour = "red", alpha = 0.5, bins = 500)+
+  #geom_density(aes(y=..count..), data = wait_3yr, colour = "blue", alpha = 0.5, bins = 500)+
+#geom_density(aes(y=..count..), data = wait_5yr ,colour = "magenta", alpha = 0.5, bins = 500)+
+ # geom_density(aes(y=..count..), data = wait_10yr, colour = "darkblue", alpha = 0.5, bins = 500)+
+  #geom_density(aes(y=..count..), data = transplant, colour = "grey",linetype = "dashed",alpha = 0.5, bins = 500)+
+  #  geom_density(aes(y=..count..), data = wait_less_6mnth, colour = "grey",linetype = "dashed",alpha = 0.5, bins = 500)+
+      geom_density(aes(y=..count..), data = wait_less_1yr, colour = "blue",linetype = "solid",alpha = 0.5, bins = 500)+
+    geom_density(aes(y=..count..), data = wait_1_to_3_yrs, colour = "magenta",linetype = "solid",alpha = 0.5, bins = 500)+
+      geom_density(aes(y=..count..), data = wait_3_to_5_yrs, colour = "green",linetype = "solid",alpha = 0.5, bins = 500)+
+    geom_density(aes(y=..count..), data = wait_10_yrs, colour = "grey",linetype = "solid",alpha = 0.5, bins = 500)+
+ labs(title = "TBS of transplanted patients versus those waiting >5yrs")+
+  theme(aspect.ratio = 1)+
+  facet_wrap(~additional_points)
+#remove recip IDS ofthose included in waiting list and those included in recipients
+
+
+ggplot(data = transplanted_patient_table, aes(x = tbs))+geom_density(aes(y=..count..),  colour = "grey",linetype = "dashed",alpha = 0.5, bins = 500)+
+  labs(title = "TBS of transplanted patients versus those waiting >5yrs")+
+  theme(aspect.ratio = 1)+
+  facet_wrap(~additional_points)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r sickest 10% plot, fig.height=2.5, fig.width=7, message=FALSE, warning=FALSE}
+
+sickest_10pct_tbs_sim_all = transplanted_patient_table %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>% arrange(desc(tbs)) %>% slice_head(prop = 0.1)
+
+#medians
+sickest_medians = sickest_10pct_tbs_sim_all %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>%
+   summarise(median = median(number_of_runs_involved))
+
+sickest_10pct_tbs_sim_all$sim_count = as.factor(sickest_10pct_tbs_sim_all$sim_count)
+sickest_10pct_tbs_sim_all$additional_points = as.factor(sickest_10pct_tbs_sim_all$additional_points)
+
+median_median =  sickest_medians%>% select( median, additional_points) %>%
+  group_by(additional_points ) %>%
+  summarise(median_median = median(median), number = n())
+
+
+ggplot(sickest_medians, aes(x= additional_points, y=median,  colour = additional_points))+
+   geom_jitter(alpha = 0.7, size = 2)+
+   geom_boxplot(colour = "black", alpha = 0)+
+   #facet_wrap(~additional_points)+
+  labs(title = "Median Time to Transplant for top 10% scores", y= "Number of weeks", x= "Simulation number")+
+  theme(legend.position = "none", aspect.ratio=0.5)+
+ stat_summary(fun.y= median, geom="bar", width=1, color="black")+
+  geom_text(data = median_median, aes(x=additional_points, y=median_median, label = median_median), colour = "black", alpha=0.8, size = 5, vjust= -1.2)
+
+```
+
+
+```{r sickest 10% plot 2, fig.height=2.5, fig.width=10, message=FALSE, warning=FALSE}
+
+sickest_10pct_tbs_sim_all %>% ggplot(aes(y=tbs, x=sim_count, colour = sim_count))+
+  geom_jitter(size = 0.1)+
+  ylim(0, 1700)+
+  theme(legend.position = "none")
+
+ggplot(sickest_10pct_tbs_sim_all, aes(x= sim_count, y=number_of_runs_involved,  colour = additional_points))+
+   geom_jitter(alpha = 0.8, size = 0.1)+
+   stat_boxplot(colour = "black", alpha = 0)+
+   facet_wrap(~additional_points)+
+  labs(title = "Time to Transplant for top 10% scores", y= "Number of weeks", x= "Simulation number")+
+  theme(legend.position = "none", aspect.ratio=0.5)+
+  geom_text(data = sickest_medians, aes(x= sim_count, y=median, label = median), colour = "black", size = 5, vjust = -0.5)
+
+
+```
+
+
+
+
+
+
+```{r sickest 25% plot, fig.height=2.5, fig.width=7, message=FALSE, warning=FALSE}
+
+sickest_25pct_tbs_sim_all = transplanted_patient_table %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>% arrange(desc(tbs)) %>% slice_head(prop = 0.25)
+
+#medians
+sickest_medians = sickest_25pct_tbs_sim_all %>%  group_by(sim_count, .add = TRUE) %>% group_by(additional_points, .add = TRUE) %>%
+   summarise(median = median(number_of_runs_involved))
+
+sickest_25pct_tbs_sim_all$sim_count = as.factor(sickest_25pct_tbs_sim_all$sim_count)
+sickest_25pct_tbs_sim_all$additional_points = as.factor(sickest_25pct_tbs_sim_all$additional_points)
+
+median_median =  sickest_medians%>% select( median, additional_points) %>%
+  group_by(additional_points ) %>%
+  summarise(median_median = median(median), number = n())
+
+
+ggplot(sickest_medians, aes(x= additional_points, y=median,  colour = additional_points))+
+   geom_jitter(alpha = 0.7, size = 2)+
+   geom_boxplot(colour = "black", alpha = 0)+
+   #facet_wrap(~additional_points)+
+  labs(title = "Median Time to Transplant for top 25% scores", y= "Number of weeks", x= "Simulation number")+
+  theme(legend.position = "none", aspect.ratio=0.5)+
+ stat_summary(fun.y= median, geom="bar", width=1, color="black")+
+  geom_text(data = median_median, aes(x=additional_points, y=median_median, label = median_median), colour = "black", alpha=0.8, size = 5, vjust= -1.2)
+
+```
+
+
+
+
+
+
+```{r sickest 25% plot, fig.height=2.5, fig.width=7, message=FALSE, warning=FALSE}
+
+sickest_25pct_tbs_sim_all %>% ggplot(aes(y=tbs, x=sim_count, colour = sim_count))+
+  geom_jitter(size = 0.1)+
+  ylim(0, 1700)+
+  theme(legend.position = "none")
+
+
+
+ggplot(sickest_25pct_tbs_sim_all, aes(x= sim_count, y=number_of_runs_involved,  colour = additional_points))+
+   geom_jitter(alpha = 0.8, size = 0.1)+
+   geom_boxplot(colour = "black", alpha = 0)+
+   facet_wrap(~additional_points)+
+  labs(title = "Time to Transplant for top 25% scores", y= "Number of weeks", x= "Simulation number")+
+  theme(legend.position = "none", aspect.ratio=0.5)+
+  geom_text(data = sickest_medians, aes(x= sim_count, y=median, label = median), colour = "black", size = 5, vjust = -0.5)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
